@@ -8,18 +8,19 @@ class ScanAttendanceRequest extends FormRequest
 {
     public function authorize(): bool
     {
-        // Any authenticated, active user with the scan permission may
-        // scan. The QR token itself is validated in AttendanceService,
-        // not here, since an expired/unknown token is a business-logic
-        // failure (422) rather than a validation failure (422 too, but
-        // with a friendlier custom message via the exception).
-        return $this->user()?->can('scan-attendance') ?? false;
+        // No session to check — Identity is verified inside
+        // AttendanceService against user_id + employment_number, and
+        // abuse is blunted by the throttle middleware on the route
+        // plus the QR token's own short expiry.
+        return true;
     }
 
     public function rules(): array
     {
         return [
             'token' => ['required', 'string', 'size:48'],
+            'user_id' => ['required', 'integer', 'exists:users,id'],
+            'employment_number' => ['required', 'string', 'max:50'],
         ];
     }
 }

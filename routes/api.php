@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\Admin\AttendanceLogController;
+use App\Http\Controllers\Api\Admin\EmployeeController;
 use App\Http\Controllers\Api\Admin\PermissionController;
 use App\Http\Controllers\Api\Admin\QrCodeController;
 use App\Http\Controllers\Api\Admin\RoleController;
@@ -8,14 +9,18 @@ use App\Http\Controllers\Api\Admin\UserRoleController;
 use App\Http\Controllers\Api\AttendanceController;
 use Illuminate\Support\Facades\Route;
 
-Route::middleware('auth:sanctum')->group(function () {
+// Public: no login required. An admin displays the QR from their own
+// dashboard; the employee scans it on their own phone, self-identifies
+// via name + employment number. Protected by the QR token's short
+// expiry and throttling rather than a session.
+Route::prefix('attendance')->group(function () {
+    Route::get('employees', [AttendanceController::class, 'employees'])
+        ->middleware('throttle:30,1');
+    Route::post('scan', [AttendanceController::class, 'store'])
+        ->middleware('throttle:6,1');
+});
 
-    // Employee-facing: any authenticated, active user.
-    Route::prefix('attendance')->group(function () {
-        Route::post('scan', [AttendanceController::class, 'store'])
-            ->middleware('throttle:6,1'); // 6 scans/minute — plenty for real use, blunts abuse
-        Route::get('history', [AttendanceController::class, 'history']);
-    });
+Route::middleware('auth:sanctum')->group(function () {
 
     // Admin-facing. Authorization is enforced inside each controller
     // via $this->authorize(...) against Spatie permissions, rather
@@ -28,6 +33,8 @@ Route::middleware('auth:sanctum')->group(function () {
 
         Route::get('attendance/logs', [AttendanceLogController::class, 'index']);
         Route::get('attendance/logs/live', [AttendanceLogController::class, 'live']);
+
+        Route::apiResource('employees', EmployeeController::class)->except(['create', 'edit']);
 
         Route::apiResource('roles', RoleController::class)->except(['edit', 'create']);
         Route::apiResource('permissions', PermissionController::class)->only(['index', 'store', 'destroy']);

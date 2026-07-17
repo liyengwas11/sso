@@ -4,22 +4,30 @@ namespace App\Services;
 
 use App\Exceptions\DuplicateScanException;
 use App\Exceptions\ExpiredQrException;
+use App\Exceptions\InvalidEmployeeException;
 use App\Models\AttendanceLog;
 use App\Models\AttendanceQrCode;
 use App\Models\User;
-use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Http\Request;
 
 class AttendanceService
 {
     /**
-     * Validate the scanned token and record a clock-in or clock-out,
-     * auto-toggling based on the user's last entry for the day.
+     * Validate the scanned token, verify the selected employee's
+     * identity against their employment number, and record a
+     * clock-in or clock-out — auto-toggling based on their last
+     * entry for the day.
+     *
+     * There's no authenticated session here by design: the employee
+     * picked their own phone up and scanned a code displayed by an
+     * admin, then self-identified. The employment number is what
+     * stops someone picking a colleague's name off the list.
      *
      * @throws ExpiredQrException
+     * @throws InvalidEmployeeException
      * @throws DuplicateScanException
      */
-    public function processScan(User $user, string $token, Request $request): AttendanceLog
+    public function processScan(string $token, int $userId, string $employmentNumber, Request $request): AttendanceLog
     {
         $qr = AttendanceQrCode::where('token', $token)
             ->active()
@@ -28,6 +36,8 @@ class AttendanceService
         if (! $qr) {
             throw new ExpiredQrException();
         }
+
+        $user = $this->resolveEmployee($userId, $employmentNumber);
 
         if ($this->hasRecentDuplicate($user)) {
             throw new DuplicateScanException();
@@ -45,13 +55,27 @@ class AttendanceService
         ]);
     }
 
-    public function historyForUser(User $user, ?string $from = null, ?string $to = null, int $perPage = 20): LengthAwarePaginator
+    /**
+     * Confirms the selected dropdown entry (user_id) actually belongs
+     * to the person who typed this employment_number, and that the
+     * account is active. Deliberately doesn't distinguish "wrong
+     * number" from "unknown user" in the exception message — that
+     * would let someone probe which employment numbers exist.
+     *
+     * @throws InvalidEmployeeException
+     */
+    private function resolveEmployee(int $userId, string $employmentNumber): User
     {
-        return AttendanceLog::forUser($user->id)
-            ->when($from, fn ($q) => $q->whereDate('scanned_at', '>=', $from))
-            ->when($to, fn ($q) => $q->whereDate('scanned_at', '<=', $to))
-            ->latest('scanned_at')
-            ->paginate($perPage);
+        $user = User::where('id', $userId)
+            ->where('employment_number', $employmentNumber)
+            ->where('status', 'active')
+            ->first();
+
+        if (! $user) {
+            throw new InvalidEmployeeException();
+        }
+
+        return $user;
     }
 
     private function hasRecentDuplicate(User $user): bool
@@ -62,9 +86,10 @@ class AttendanceService
     }
 
     /**
-     * Determine in/out based on the user's most recent log *for today*
-     * in their own timezone — so a clock-in just before midnight
-     * doesn't force a clock-out the moment the calendar day rolls over.
+     * Determine in/out based on the employee's most recent log *for
+     * today* in their own timezone — so a clock-in just before
+     * midnight doesn't force a clock-out the moment the calendar day
+     * rolls over.
      */
     private function nextLogType(User $user): string
     {
@@ -84,8 +109,6 @@ class AttendanceService
             return 'unknown';
         }
 
-        // Lightweight heuristic for Phase 1. Swap in jenssegers/agent
-        // (or similar) if richer device breakdown is needed later.
         return match (true) {
             (bool) preg_match('/tablet|ipad/i', $userAgent) => 'tablet',
             (bool) preg_match('/mobile|android|iphone/i', $userAgent) => 'mobile',
