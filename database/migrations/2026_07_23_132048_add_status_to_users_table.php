@@ -9,14 +9,14 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('users', function (Blueprint $table) {
-            $table->string('employment_number')->nullable()->unique()->after('name');
+            $table->string('status')->default('active')->after('email'); // active | suspended
         });
     }
 
     public function down(): void
     {
         Schema::table('users', function (Blueprint $table) {
-            $table->dropColumn('employment_number');
+            $table->dropColumn('status');
         });
     }
 };

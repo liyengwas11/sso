@@ -3,8 +3,9 @@
 namespace App\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rules\Password;
 
-class StoreEmployeeRequest extends FormRequest
+class StoreStaffRequest extends FormRequest
 {
     public function authorize(): bool
     {
@@ -15,9 +16,10 @@ class StoreEmployeeRequest extends FormRequest
     {
         return [
             'name' => ['required', 'string', 'max:255'],
-            'employment_number' => ['required', 'string', 'max:50', 'unique:users,employment_number'],
             'email' => ['required', 'email', 'max:255', 'unique:users,email'],
-            'timezone' => ['sometimes', 'string', 'max:50'],
+            'password' => ['required', Password::min(8)],
+            'roles' => ['required', 'array', 'min:1'],
+            'roles.*' => ['string', 'exists:roles,name'],
         ];
     }
 }

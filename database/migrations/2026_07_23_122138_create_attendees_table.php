@@ -6,20 +6,21 @@ use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
-    /**
-     * Run the migrations.
-     */
     public function up(): void
     {
         Schema::create('attendees', function (Blueprint $table) {
             $table->id();
+            $table->string('name');
+            $table->string('organisation')->nullable();
+            $table->string('email')->nullable();
+            $table->string('role_title')->nullable(); // e.g. Delegate, Speaker, VIP — free text for Phase 1
             $table->timestamps();
+
+            $table->index(['name', 'organisation']);
         });
+       
     }
 
-    /**
-     * Reverse the migrations.
-     */
     public function down(): void
     {
         Schema::dropIfExists('attendees');
