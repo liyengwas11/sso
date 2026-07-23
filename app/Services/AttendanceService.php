@@ -13,16 +13,6 @@ use Illuminate\Http\Request;
 class AttendanceService
 {
     /**
-     * Validate the scanned token, verify the selected employee's
-     * identity against their employment number, and record a
-     * clock-in or clock-out — auto-toggling based on their last
-     * entry for the day.
-     *
-     * There's no authenticated session here by design: the employee
-     * picked their own phone up and scanned a code displayed by an
-     * admin, then self-identified. The employment number is what
-     * stops someone picking a colleague's name off the list.
-     *
      * @throws ExpiredQrException
      * @throws InvalidEmployeeException
      * @throws DuplicateScanException
@@ -56,12 +46,6 @@ class AttendanceService
     }
 
     /**
-     * Confirms the selected dropdown entry (user_id) actually belongs
-     * to the person who typed this employment_number, and that the
-     * account is active. Deliberately doesn't distinguish "wrong
-     * number" from "unknown user" in the exception message — that
-     * would let someone probe which employment numbers exist.
-     *
      * @throws InvalidEmployeeException
      */
     private function resolveEmployee(int $userId, string $employmentNumber): User
@@ -85,12 +69,6 @@ class AttendanceService
             ->exists();
     }
 
-    /**
-     * Determine in/out based on the employee's most recent log *for
-     * today* in their own timezone — so a clock-in just before
-     * midnight doesn't force a clock-out the moment the calendar day
-     * rolls over.
-     */
     private function nextLogType(User $user): string
     {
         $startOfDay = now($user->timezone)->startOfDay()->utc();

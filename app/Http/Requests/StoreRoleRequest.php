@@ -15,10 +15,6 @@ class StoreRoleRequest extends FormRequest
     {
         return [
             'name' => ['required', 'string', 'max:50', 'unique:roles,name'],
-            // Permissions are looked up by name against whatever
-            // currently exists in the permissions table — new
-            // permissions are created separately via PermissionController,
-            // so this list is never hardcoded here.
             'permissions' => ['sometimes', 'array'],
             'permissions.*' => ['string', 'exists:permissions,name'],
         ];

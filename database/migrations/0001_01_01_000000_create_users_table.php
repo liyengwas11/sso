@@ -15,8 +15,8 @@ return new class extends Migration
             $table->string('email')->unique();
             $table->timestamp('email_verified_at')->nullable();
             $table->string('password');
-            $table->string('timezone')->default('Africa/Nairobi');
-            $table->string('status')->default('active'); // active | suspended
+            $table->string('timezone')->default('Africa/Nairobi')->after('email');
+            $table->string('status')->default('active')->after('timezone');
             $table->rememberToken();
             $table->timestamps();
         });

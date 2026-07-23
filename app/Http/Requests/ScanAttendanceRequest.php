@@ -8,10 +8,6 @@ class ScanAttendanceRequest extends FormRequest
 {
     public function authorize(): bool
     {
-        // No session to check — Identity is verified inside
-        // AttendanceService against user_id + employment_number, and
-        // abuse is blunted by the throttle middleware on the route
-        // plus the QR token's own short expiry.
         return true;
     }
 
