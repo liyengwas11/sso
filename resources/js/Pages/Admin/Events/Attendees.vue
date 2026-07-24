@@ -6,12 +6,41 @@ import { ref, watch, nextTick, computed } from "vue";
 import QRCode from "qrcode";
 
 const props = defineProps({
-    event: Object, // includes .days: [{id, date, day_number}, ...]
+    event: Object,
     passes: Object,
     filters: Object,
+    today: Object,
 });
 
-const isMultiDay = computed(() => props.event.days.length > 1);
+const isMultiDay = computed(() => props.event.days?.length > 1);
+
+// Event status badge color
+const eventStatusColor = computed(() => {
+    const status = props.event.status;
+    return {
+        'active': 'bg-green-100 text-green-700 border-green-200',
+        'upcoming': 'bg-blue-100 text-blue-700 border-blue-200',
+        'ended': 'bg-red-100 text-red-700 border-red-200',
+    }[status] || 'bg-slate-100 text-slate-700 border-slate-200';
+});
+
+// Check-in status badge color
+function getCheckInStatusColor(status) {
+    return {
+        'checked_in': 'bg-green-100 text-green-700 border-green-200',
+        'checked_out': 'bg-blue-100 text-blue-700 border-blue-200',
+        'not_checked_in': 'bg-slate-100 text-slate-400 border-slate-200',
+    }[status] || 'bg-slate-100 text-slate-400 border-slate-200';
+}
+
+// Check-in status label
+function getCheckInStatusLabel(status) {
+    return {
+        'checked_in': '✅ Checked In',
+        'checked_out': '↩️ Checked Out',
+        'not_checked_in': '⏳ Not Checked In',
+    }[status] || status;
+}
 
 const search = ref(props.filters.search ?? "");
 let searchTimeout = null;
@@ -32,7 +61,7 @@ const form = useForm({
     email: "",
     role_title: "",
     photo: null,
-    days: [], // day_numbers; empty = all days
+    days: [],
 });
 
 function openCreate() {
@@ -53,7 +82,6 @@ function openEdit(pass) {
     form.photo = null;
     form.days = pass.days.map(d => d.day_number);
 
-    // Set photo preview from existing media
     const photoUrl = getAttendeePhotoUrl(attendee);
     photoPreview.value = photoUrl;
 
@@ -64,7 +92,6 @@ function handleFileUpload(event) {
     const file = event.target.files[0];
     if (file) {
         form.photo = file;
-        // Create preview URL
         const reader = new FileReader();
         reader.onload = (e) => {
             photoPreview.value = e.target.result;
@@ -76,7 +103,6 @@ function handleFileUpload(event) {
 function removePhoto() {
     photoPreview.value = null;
     form.photo = null;
-    // Reset the file input
     const fileInput = document.getElementById('photo-input');
     if (fileInput) {
         fileInput.value = '';
@@ -101,7 +127,6 @@ function submitAdd() {
     };
 
     if (editingAttendee.value) {
-        // For edit, we need to update the attendee
         form.transform((data) => ({ ...data, _method: "patch" }))
             .post(route("admin.events.attendees.update", {
                 event: props.event.id,
@@ -134,12 +159,8 @@ function dayLabel(pass) {
 const previewPass = ref(null);
 const qrCanvas = ref(null);
 async function openPreview(pass) {
-    // Make sure we have the attendee with media loaded
-    // If not, we need to fetch it or use what's available
     previewPass.value = pass;
     await nextTick();
-
-    // Generate QR code
     if (qrCanvas.value) {
         QRCode.toCanvas(qrCanvas.value, pass.token, { width: 200, margin: 1 });
     }
@@ -147,17 +168,12 @@ async function openPreview(pass) {
 
 function getAttendeePhotoUrl(attendee) {
     if (!attendee) return null;
-
-    // Check if attendee has media array
     if (attendee.media && Array.isArray(attendee.media) && attendee.media.length > 0) {
         return attendee.media[0].original_url || attendee.media[0].url || null;
     }
-
-    // Check for direct photo_url property (from accessor)
     if (attendee.photo_url) {
         return attendee.photo_url;
     }
-
     return null;
 }
 
@@ -172,16 +188,10 @@ function getInitials(name) {
 }
 
 function getFullPhotoUrl(pass) {
-    // Try multiple ways to get the photo URL
     if (pass.attendee) {
-        // Try the helper first
         const url = getAttendeePhotoUrl(pass.attendee);
         if (url) return url;
-
-        // Try photo_url accessor
         if (pass.attendee.photo_url) return pass.attendee.photo_url;
-
-        // Try media collection with direct access
         if (pass.attendee.media && pass.attendee.media.length > 0) {
             const media = pass.attendee.media[0];
             return media.original_url || media.url || null;
@@ -198,6 +208,14 @@ function getFullPhotoUrl(pass) {
                 <Link :href="route('admin.events.index')" class="text-sm text-slate-400 hover:text-slate-700">← Events
                 </Link>
                 <h1 class="text-xl font-semibold text-slate-900">{{ event.name }} — Attendees</h1>
+                <div class="flex items-center gap-3 mt-1">
+                    <span class="text-xs px-3 py-1 rounded-full border font-medium" :class="eventStatusColor">
+                        📅 {{ event.status_label || 'Unknown' }}
+                    </span>
+                    <span v-if="today" class="text-xs text-slate-500">
+                        Today is Day {{ today.day_number }}
+                    </span>
+                </div>
             </div>
             <div class="flex gap-2">
                 <a :href="route('admin.events.attendees.export', event.id)"
@@ -227,83 +245,94 @@ function getFullPhotoUrl(pass) {
             class="w-full max-w-md mb-4 rounded-md border border-slate-300 px-3 py-2 text-sm" />
 
         <div class="bg-white rounded-lg border border-slate-200 overflow-hidden">
-            <table class="w-full text-sm">
-                <thead class="bg-slate-50 text-slate-500 text-left">
-                    <tr>
-                        <th class="px-4 py-3 font-medium">Image</th>
-                        <th class="px-4 py-3 font-medium">Name</th>
-                        <th class="px-4 py-3 font-medium">Organisation</th>
-                        <th class="px-4 py-3 font-medium">Role</th>
-                        <th v-if="isMultiDay" class="px-4 py-3 font-medium">Accredited</th>
-                        <th class="px-4 py-3 font-medium">Status</th>
-                        <th class="px-4 py-3 font-medium">Last check-in</th>
-                        <th class="px-4 py-3"></th>
-                    </tr>
-                </thead>
-                <tbody class="divide-y divide-slate-100">
-                    <tr v-for="pass in passes.data" :key="pass.id">
-                        <td class="px-4 py-3">
-                            <!-- Attendee Photo -->
-                            <img v-if="getAttendeePhotoUrl(pass.attendee)" :src="getAttendeePhotoUrl(pass.attendee)"
-                                :alt="pass.attendee.name" class="h-18 w-20 rounded-md object-cover" />
-                            <div v-else
-                                class="h-18 w-20 rounded-md bg-slate-100 flex items-center justify-center text-slate-400 text-sm">
-                                {{ getInitials(pass.attendee.name) }}
-                            </div>
-                        </td>
-                        <td class="px-4 py-3 text-slate-900">{{ pass.attendee.name }}</td>
-                        <td class="px-4 py-3 text-slate-600">{{ pass.attendee.organisation }}</td>
-                        <td class="px-4 py-3 text-slate-600">{{ pass.attendee.role_title }}</td>
-                        <td v-if="isMultiDay" class="px-4 py-3 text-slate-600">{{ dayLabel(pass) }}</td>
-                        <td class="px-4 py-3">
-                            <span class="text-xs px-2 py-0.5 rounded-full"
-                                :class="pass.status === 'active' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'">
-                                {{ pass.status }}
-                            </span>
-                        </td>
-                        <td class="px-4 py-3 text-slate-500">
-                            {{ pass.entry_logs?.[0]?.scanned_at ? new
-                                Date(pass.entry_logs[0].scanned_at).toLocaleString() : "—" }}
-                        </td>
-                        <td class="px-4 py-3 text-right space-x-3">
-                            <button @click="openEdit(pass)" class="text-slate-500 hover:text-slate-900">Edit</button>
-                            <button @click="openPreview(pass)" class="text-slate-500 hover:text-slate-900">View
-                                pass</button>
-                            <button v-if="pass.status === 'active'" @click="revoke(pass)"
-                                class="text-red-500 hover:text-red-700">
-                                Revoke
-                            </button>
-                        </td>
-                    </tr>
-                    <tr v-if="passes.data.length === 0">
-                        <td :colspan="isMultiDay ? 8 : 7" class="px-4 py-8 text-center text-slate-400">No attendees yet.
-                        </td>
-                    </tr>
-                </tbody>
-            </table>
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead class="bg-slate-50 text-slate-500 text-left">
+                        <tr>
+                            <th class="px-4 py-3 font-medium">Image</th>
+                            <th class="px-4 py-3 font-medium">Name</th>
+                            <th class="px-4 py-3 font-medium">Organisation</th>
+                            <th class="px-4 py-3 font-medium">Role</th>
+                            <th v-if="isMultiDay" class="px-4 py-3 font-medium">Accredited</th>
+                            <th class="px-4 py-3 font-medium">Pass Status</th>
+                            <th class="px-4 py-3 font-medium">Check-in Status</th>
+                            <th class="px-4 py-3 font-medium">Last check-in</th>
+                            <th class="px-4 py-3"></th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100">
+                        <tr v-for="pass in passes.data" :key="pass.id" class="hover:bg-slate-50 transition-colors">
+                            <td class="px-4 py-3">
+                                <img v-if="getAttendeePhotoUrl(pass.attendee)" :src="getAttendeePhotoUrl(pass.attendee)"
+                                    :alt="pass.attendee.name"
+                                    class="h-12 w-12 rounded-full object-cover border border-slate-200" />
+                                <div v-else
+                                    class="h-12 w-12 rounded-full bg-slate-100 flex items-center justify-center text-slate-400 text-sm font-medium border border-slate-200">
+                                    {{ getInitials(pass.attendee.name) }}
+                                </div>
+                            </td>
+                            <td class="px-4 py-3 text-slate-900 font-medium">{{ pass.attendee.name }}</td>
+                            <td class="px-4 py-3 text-slate-600">{{ pass.attendee.organisation }}</td>
+                            <td class="px-4 py-3 text-slate-600">{{ pass.attendee.role_title }}</td>
+                            <td v-if="isMultiDay" class="px-4 py-3 text-slate-600">{{ dayLabel(pass) }}</td>
+                            <td class="px-4 py-3">
+                                <span class="text-xs px-2 py-0.5 rounded-full"
+                                    :class="pass.status === 'active' ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-600 border border-red-200'">
+                                    {{ pass.status === 'active' ? '✅ Active' : '🚫 Revoked' }}
+                                </span>
+                            </td>
+                            <td class="px-4 py-3">
+                                <span class="text-xs px-2 py-0.5 rounded-full border font-medium"
+                                    :class="getCheckInStatusColor(pass.current_status)">
+                                    {{ getCheckInStatusLabel(pass.current_status) }}
+                                </span>
+                            </td>
+                            <td class="px-4 py-3 text-slate-500">
+                                {{ pass.entry_logs?.[0]?.scanned_at ? new
+                                    Date(pass.entry_logs[0].scanned_at).toLocaleString() : "—" }}
+                            </td>
+                            <td class="px-4 py-3 text-right space-x-3 whitespace-nowrap">
+                                <button @click="openEdit(pass)"
+                                    class="text-slate-500 hover:text-slate-900">Edit</button>
+                                <button @click="openPreview(pass)" class="text-slate-500 hover:text-slate-900">View
+                                    pass</button>
+                                <button v-if="pass.status === 'active'" @click="revoke(pass)"
+                                    class="text-red-500 hover:text-red-700">
+                                    Revoke
+                                </button>
+                            </td>
+                        </tr>
+                        <tr v-if="passes.data.length === 0">
+                            <td :colspan="isMultiDay ? 9 : 8" class="px-4 py-8 text-center text-slate-400">
+                                <div class="flex flex-col items-center">
+                                    <i class="fas fa-users text-3xl mb-2 text-slate-300"></i>
+                                    <p>No attendees yet.</p>
+                                    <p class="text-xs mt-1">Click "Add attendee" to get started.</p>
+                                </div>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
         </div>
 
         <!-- Add/Edit attendee modal -->
         <div v-if="showAddModal" class="fixed inset-0 bg-black/30 flex items-center justify-center px-4 z-50">
-            <div class="bg-white rounded-lg w-full max-w-sm p-6 max-h-[90vh] overflow-y-auto">
+            <div class="bg-white rounded-lg w-full max-w-sm p-6 max-h-[90vh] overflow-y-auto shadow-xl">
                 <h2 class="font-semibold text-slate-900 mb-4">
                     {{ editingAttendee ? "Edit attendee" : "Add attendee" }}
                 </h2>
                 <form @submit.prevent="submitAdd" class="space-y-4">
-                    <!-- Photo Upload -->
                     <div>
                         <label class="block text-sm font-medium text-slate-700 mb-1">Photo</label>
-
-                        <!-- Current photo preview -->
-                        <div v-if="photoPreview" class="mb-2">
+                        <div v-if="photoPreview" class="mb-3">
                             <img :src="photoPreview" alt="Attendee preview"
-                                class="w-20 h-20 rounded-full object-cover border-2 border-slate-200" />
+                                class="w-16 h-16 rounded-full object-cover border-2 border-slate-200" />
                         </div>
-
                         <div class="flex items-center gap-4">
                             <div class="flex-1">
                                 <input id="photo-input" type="file" accept="image/*" @change="handleFileUpload"
-                                    class="text-sm w-full" />
+                                    class="text-sm w-full file:mr-2 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-sm file:font-medium file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200 cursor-pointer" />
                             </div>
                             <button v-if="photoPreview" type="button" @click="removePhoto"
                                 class="text-sm text-red-500 hover:text-red-700">
@@ -317,7 +346,7 @@ function getFullPhotoUrl(pass) {
                     <div>
                         <label class="block text-sm font-medium text-slate-700 mb-1">Name</label>
                         <input v-model="form.name" type="text" required
-                            class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
+                            class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900" />
                         <p v-if="form.errors.name" class="mt-1 text-sm text-red-600">{{ form.errors.name }}</p>
                     </div>
 
@@ -349,9 +378,10 @@ function getFullPhotoUrl(pass) {
                         <p class="text-xs text-slate-400 mb-2">Leave all unchecked to accredit for every day.</p>
                         <div class="space-y-1.5">
                             <label v-for="day in event.days" :key="day.id"
-                                class="flex items-center gap-2 text-sm text-slate-700">
+                                class="flex items-center gap-2 text-sm text-slate-700 cursor-pointer hover:text-slate-900">
                                 <input type="checkbox" :checked="form.days.includes(day.day_number)"
-                                    @change="toggleDay(day.day_number)" class="rounded border-slate-300" />
+                                    @change="toggleDay(day.day_number)"
+                                    class="rounded border-slate-300 text-slate-900 focus:ring-slate-900" />
                                 Day {{ day.day_number }} — {{ new Date(day.date).toLocaleDateString([], {
                                     month: "short", day: "numeric"
                                 }) }}
@@ -360,13 +390,13 @@ function getFullPhotoUrl(pass) {
                         <p v-if="form.errors.days" class="mt-1 text-sm text-red-600">{{ form.errors.days }}</p>
                     </div>
 
-                    <div class="flex gap-2 pt-2">
+                    <div class="flex gap-2 pt-2 border-t border-slate-200">
                         <button type="button" @click="showAddModal = false"
                             class="flex-1 border border-slate-300 text-slate-700 text-sm font-medium rounded-md py-2 hover:bg-slate-50">
                             Cancel
                         </button>
                         <button type="submit" :disabled="form.processing"
-                            class="flex-1 bg-slate-900 text-white text-sm font-medium rounded-md py-2 disabled:opacity-50">
+                            class="flex-1 bg-slate-900 text-white text-sm font-medium rounded-md py-2 hover:bg-slate-800 disabled:opacity-50">
                             {{ editingAttendee ? "Update" : "Save" }}
                         </button>
                     </div>
@@ -377,12 +407,12 @@ function getFullPhotoUrl(pass) {
         <!-- Pass preview modal -->
         <div v-if="previewPass" class="fixed inset-0 bg-black/30 flex items-center justify-center px-4 z-50"
             @click.self="previewPass = null">
-            <div class="bg-white rounded-lg w-full max-w-xs p-6 text-center">
-                <!-- Attendee Photo -->
+            <div class="bg-white rounded-lg w-full max-w-xs p-6 text-center shadow-xl">
                 <img v-if="getFullPhotoUrl(previewPass)" :src="getFullPhotoUrl(previewPass)"
-                    :alt="previewPass.attendee.name" class="w-20 h-20 rounded-full object-cover mx-auto mb-3" />
+                    :alt="previewPass.attendee.name"
+                    class="w-20 h-20 rounded-full object-cover mx-auto mb-3 border-2 border-slate-200" />
                 <div v-else
-                    class="w-20 h-20 rounded-full bg-slate-100 flex items-center justify-center text-slate-400 text-xl mx-auto mb-3">
+                    class="w-20 h-20 rounded-full bg-slate-100 flex items-center justify-center text-slate-400 text-xl mx-auto mb-3 border-2 border-slate-200">
                     {{ getInitials(previewPass.attendee.name) }}
                 </div>
 

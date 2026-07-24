@@ -24,9 +24,12 @@ class AttendeeController extends Controller
     {
         $this->authorize('manage-events', $request->user());
 
+        // Get today's event day for status checking
+        $today = $event->days()->whereDate('date', now()->toDateString())->first();
+
         $passes = EventPass::with([
             'attendee',
-            'attendee.media', // Make sure this is included
+            'attendee.media',
             'days',
             'entryLogs' => fn($q) => $q->latest('scanned_at')->limit(1)
         ])
@@ -39,11 +42,57 @@ class AttendeeController extends Controller
             ->paginate($request->integer('per_page', 25))
             ->withQueryString();
 
+        // Transform passes to include current status
+        $passes->getCollection()->transform(function ($pass) use ($today) {
+            $pass->current_status = $today ? $pass->getCurrentStatusForDay($today) : 'not_checked_in';
+            return $pass;
+        });
+
+        // Calculate event status
+        $eventStatus = $this->getEventStatus($event);
+
         return Inertia::render('Admin/Events/Attendees', [
-            'event' => [...$event->toArray(), 'days' => $event->days],
+            'event' => [
+                ...$event->toArray(),
+                'days' => $event->days,
+                'status' => $eventStatus,
+                'status_label' => $this->getEventStatusLabel($eventStatus),
+            ],
             'passes' => $passes,
             'filters' => $request->only('search'),
+            'today' => $today,
         ]);
+    }
+
+    /**
+     * Get the event status based on dates
+     */
+    private function getEventStatus(Event $event): string
+    {
+        $now = now()->startOfDay();
+        $start = $event->start_date->startOfDay();
+        $end = $event->end_date->startOfDay();
+
+        if ($now > $end) {
+            return 'ended';
+        } elseif ($now >= $start && $now <= $end) {
+            return 'active';
+        } else {
+            return 'upcoming';
+        }
+    }
+
+    /**
+     * Get the event status label
+     */
+    private function getEventStatusLabel(string $status): string
+    {
+        return match ($status) {
+            'active' => 'Active',
+            'ended' => 'Ended',
+            'upcoming' => 'Upcoming',
+            default => 'Unknown',
+        };
     }
 
     public function store(StoreAttendeeRequest $request, Event $event): RedirectResponse
@@ -60,21 +109,15 @@ class AttendeeController extends Controller
             ->with('success', "{$attendee->name} added and issued a pass.");
     }
 
-    /**
-     * Update an existing attendee and their pass accreditation
-     */
     public function update(StoreAttendeeRequest $request, Event $event, Attendee $attendee): RedirectResponse
     {
         $attendee->update($request->validatedAttendeeData());
 
-        // Handle photo update
         if ($request->hasPhoto()) {
-            // Remove old photo
             $attendee->clearMediaCollection('photo');
             $attendee->addMediaFromRequest('photo')->toMediaCollection('photo');
         }
 
-        // Update pass accreditation
         $pass = EventPass::where('event_id', $event->id)
             ->where('attendee_id', $attendee->id)
             ->first();
@@ -91,12 +134,6 @@ class AttendeeController extends Controller
             ->with('success', "{$attendee->name} updated.");
     }
 
-    /**
-     * CSV columns: name, organisation, email, role_title. Everyone
-     * imported gets accredited for ALL days of the event — narrowing
-     * specific imported people to specific days is a manual edit
-     * afterward, not a CSV column, to keep the import format simple.
-     */
     public function import(ImportAttendeesRequest $request, Event $event): RedirectResponse
     {
         $handle = fopen($request->file('file')->getRealPath(), 'r');
@@ -119,7 +156,7 @@ class AttendeeController extends Controller
                 if (empty($data['name'])) continue;
 
                 $attendee = Attendee::create($data);
-                $this->passService->issuePass($event, $attendee, null); // all days
+                $this->passService->issuePass($event, $attendee, null);
                 $imported++;
             }
         });

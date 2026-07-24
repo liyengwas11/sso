@@ -15,9 +15,24 @@ class DashboardController extends Controller
     {
         $upcomingOrCurrent = Event::where('end_date', '>=', now()->toDateString())
             ->withCount('passes')
+            ->with(['days', 'media']) // Load media for images
             ->orderBy('start_date')
             ->limit(5)
-            ->get();
+            ->get()
+            ->map(function ($event) {
+                return [
+                    'id' => $event->id,
+                    'name' => $event->name,
+                    'description' => $event->description,
+                    'venue' => $event->venue,
+                    'start_date' => $event->start_date,
+                    'end_date' => $event->end_date,
+                    'is_recurring' => $event->is_recurring,
+                    'passes_count' => $event->passes_count,
+                    'days' => $event->days,
+                    'cover_url' => $event->coverUrl(), // Add cover URL
+                ];
+            });
 
         return Inertia::render('Admin/Dashboard', [
             'stats' => [
