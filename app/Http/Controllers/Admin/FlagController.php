@@ -11,19 +11,32 @@ use Inertia\Response;
 
 class FlagController extends Controller
 {
-  
-    public function index(Request $request): Response
+
+    public function index(Request $request)
     {
-        $this->authorize('manage-events', $request->user());
+        $status = $request->query('status', 'unreviewed');
+
+        $flags = EventEntryLog::with([
+            'eventPass.attendee',
+            'eventPass.attendee.media',
+            'eventPass.event',
+            'scannedBy:id,name'
+        ])
+            ->flagged()
+            ->when($status === 'unreviewed', fn($q) => $q->unreviewed())
+            ->latest('scanned_at')
+            ->paginate(25)
+            ->withQueryString();
+// dd($flags->first()->eventPass->attendee);
+        // Add a count of unreviewed flags for the badge
+        $unreviewedCount = EventEntryLog::flagged()->unreviewed()->count();
+        $totalCount = EventEntryLog::flagged()->count();
 
         return Inertia::render('Admin/Flags/Index', [
-            'flags' => EventEntryLog::with(['eventPass.attendee', 'eventPass.event', 'scannedBy:id,name'])
-                ->flagged()
-                ->when($request->query('status', 'unreviewed') === 'unreviewed', fn ($q) => $q->unreviewed())
-                ->latest('scanned_at')
-                ->paginate(25)
-                ->withQueryString(),
-            'statusFilter' => $request->query('status', 'unreviewed'),
+            'flags' => $flags,
+            'statusFilter' => $status,
+            'unreviewedCount' => $unreviewedCount,
+            'totalCount' => $totalCount,
         ]);
     }
 

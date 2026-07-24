@@ -18,18 +18,21 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class AttendeeController extends Controller
 {
-    public function __construct(private readonly PassService $passService)
-    {
-    }
+    public function __construct(private readonly PassService $passService) {}
 
     public function index(Request $request, Event $event): Response
     {
         $this->authorize('manage-events', $request->user());
 
-        $passes = EventPass::with(['attendee', 'days', 'entryLogs' => fn ($q) => $q->latest('scanned_at')->limit(1)])
+        $passes = EventPass::with([
+            'attendee',
+            'attendee.media', // Make sure this is included
+            'days',
+            'entryLogs' => fn($q) => $q->latest('scanned_at')->limit(1)
+        ])
             ->where('event_id', $event->id)
             ->when($request->query('search'), function ($q, $search) {
-                $q->whereHas('attendee', fn ($q) => $q
+                $q->whereHas('attendee', fn($q) => $q
                     ->where('name', 'like', "%{$search}%")
                     ->orWhere('organisation', 'like', "%{$search}%"));
             })
@@ -45,16 +48,47 @@ class AttendeeController extends Controller
 
     public function store(StoreAttendeeRequest $request, Event $event): RedirectResponse
     {
-        $attendee = Attendee::create($request->safe()->except(['photo', 'days']));
+        $attendee = Attendee::create($request->validatedAttendeeData());
 
-        if ($request->hasFile('photo')) {
+        if ($request->hasPhoto()) {
             $attendee->addMediaFromRequest('photo')->toMediaCollection('photo');
         }
 
-        $this->passService->issuePass($event, $attendee, $request->filled('days') ? $request->input('days') : null);
+        $this->passService->issuePass($event, $attendee, $request->validatedDays());
 
         return redirect()->route('admin.events.attendees.index', $event)
             ->with('success', "{$attendee->name} added and issued a pass.");
+    }
+
+    /**
+     * Update an existing attendee and their pass accreditation
+     */
+    public function update(StoreAttendeeRequest $request, Event $event, Attendee $attendee): RedirectResponse
+    {
+        $attendee->update($request->validatedAttendeeData());
+
+        // Handle photo update
+        if ($request->hasPhoto()) {
+            // Remove old photo
+            $attendee->clearMediaCollection('photo');
+            $attendee->addMediaFromRequest('photo')->toMediaCollection('photo');
+        }
+
+        // Update pass accreditation
+        $pass = EventPass::where('event_id', $event->id)
+            ->where('attendee_id', $attendee->id)
+            ->first();
+
+        if ($pass) {
+            $days = $request->filled('days')
+                ? $event->days()->whereIn('day_number', $request->input('days'))->get()
+                : $event->days;
+
+            $pass->days()->sync($days->pluck('id'));
+        }
+
+        return redirect()->route('admin.events.attendees.index', $event)
+            ->with('success', "{$attendee->name} updated.");
     }
 
     /**
@@ -106,7 +140,7 @@ class AttendeeController extends Controller
             $out = fopen('php://output', 'w');
             fputcsv($out, ['Name', 'Organisation', 'Email', 'Role', 'Pass Status', 'Days Accredited', 'Last Check-in']);
 
-            EventPass::with(['attendee', 'days', 'entryLogs' => fn ($q) => $q->latest('scanned_at')->limit(1)])
+            EventPass::with(['attendee', 'days', 'entryLogs' => fn($q) => $q->latest('scanned_at')->limit(1)])
                 ->where('event_id', $event->id)
                 ->chunk(200, function ($passes) use ($out) {
                     foreach ($passes as $pass) {

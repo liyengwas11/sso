@@ -36,16 +36,22 @@ Route::middleware(['auth'])->prefix('admin')->name('admin.')->group(function () 
     Route::prefix('events/{event}/attendees')->name('events.attendees.')->group(function () {
         Route::get('/', [AttendeeController::class, 'index'])->name('index');
         Route::post('/', [AttendeeController::class, 'store'])->name('store');
+        Route::patch('/{attendee}', [AttendeeController::class, 'update'])->name('update');
         Route::post('import', [AttendeeController::class, 'import'])->name('import');
         Route::get('export', [AttendeeController::class, 'export'])->name('export');
     });
     Route::post('passes/{pass}/revoke', [AttendeeController::class, 'revokePass'])->name('passes.revoke');
 
-    // Gate scanning
-    Route::prefix('events/{event}/scan')->name('events.scan.')->group(function () {
-        Route::get('/', [CheckInController::class, 'show'])->name('show');
-        Route::post('/', [CheckInController::class, 'store'])->name('store');
-    });
+    // Gate scanning (Check-in / Check-out)
+    Route::get('/events/{event}/scan/{type?}', [CheckInController::class, 'show'])
+        ->name('events.scan')
+        ->where('type', 'check-in|check-out')
+        ->defaults('type', 'check-in');
+
+    Route::post('/events/{event}/scan/{type?}', [CheckInController::class, 'store'])
+        ->name('events.scan.process')
+        ->where('type', 'check-in|check-out')
+        ->defaults('type', 'check-in');
 
     // Per-event report
     Route::get('events/{event}/reports', [ReportController::class, 'show'])->name('events.reports.show');
@@ -57,6 +63,7 @@ Route::middleware(['auth'])->prefix('admin')->name('admin.')->group(function () 
     // Staff accounts (people who can log in — admins, gate staff)
     Route::get('staff', [StaffController::class, 'index'])->name('staff.index');
     Route::post('staff', [StaffController::class, 'store'])->name('staff.store');
+    Route::patch('staff/{staffMember}', [StaffController::class, 'update'])->name('staff.update');
     Route::delete('staff/{staffMember}', [StaffController::class, 'destroy'])->name('staff.destroy');
 
     // Roles & permissions

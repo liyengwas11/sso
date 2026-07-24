@@ -44,11 +44,7 @@ class EventPass extends Model
     }
 
     /**
-     * The specific days this pass grants entry for. An empty
-     * collection is NOT treated as "all days" anywhere in this
-     * codebase — PassService::issuePass always attaches at least one
-     * day explicitly, so ambiguity here would indicate a bug, not a
-     * valid "unrestricted" state.
+     * The specific days this pass grants entry for.
      */
     public function days(): BelongsToMany
     {
@@ -71,9 +67,7 @@ class EventPass extends Model
     }
 
     /**
-     * The most recent successful (granted or override-granted) entry
-     * ON A GIVEN DAY — anti-passback is scoped per-day for multi-day
-     * events, since re-entering on Day 2 isn't a duplicate of Day 1.
+     * The most recent successful entry ON A GIVEN DAY
      */
     public function lastGrantedEntryForDay(EventDay $day): ?EventEntryLog
     {
@@ -82,5 +76,97 @@ class EventPass extends Model
             ->whereIn('result', ['granted', 'override_granted'])
             ->latest('scanned_at')
             ->first();
+    }
+
+    /**
+     * Get the current attendance status for this pass.
+     * Returns: 'not_checked_in' | 'checked_in' | 'checked_out'
+     */
+    public function getCurrentStatusAttribute(): string
+    {
+        $latest = $this->entryLogs()
+            ->whereIn('result', ['granted', 'override_granted'])
+            ->latest('scanned_at')
+            ->first();
+
+        if (!$latest) {
+            return 'not_checked_in';
+        }
+
+        return $latest->type; // 'check-in' or 'check-out'
+    }
+
+    /**
+     * Get the current attendance status for a specific day.
+     */
+    public function getCurrentStatusForDay(EventDay $day): string
+    {
+        $latest = $this->entryLogs()
+            ->where('event_day_id', $day->id)
+            ->whereIn('result', ['granted', 'override_granted'])
+            ->latest('scanned_at')
+            ->first();
+
+        if (!$latest) {
+            return 'not_checked_in';
+        }
+
+        return $latest->type; // 'check-in' or 'check-out'
+    }
+
+    /**
+     * Get the most recent successful check-in log.
+     */
+    public function getLatestCheckInAttribute(): ?EventEntryLog
+    {
+        return $this->entryLogs()
+            ->where('type', 'check-in')
+            ->whereIn('result', ['granted', 'override_granted'])
+            ->latest('scanned_at')
+            ->first();
+    }
+
+    /**
+     * Get the most recent successful check-out log.
+     */
+    public function getLatestCheckOutAttribute(): ?EventEntryLog
+    {
+        return $this->entryLogs()
+            ->where('type', 'check-out')
+            ->whereIn('result', ['granted', 'override_granted'])
+            ->latest('scanned_at')
+            ->first();
+    }
+
+    /**
+     * Check if the attendee is currently checked in (for today).
+     */
+    public function isCheckedInToday(): bool
+    {
+        $today = $this->event->days()
+            ->whereDate('date', now()->toDateString())
+            ->first();
+
+        if (!$today) {
+            return false;
+        }
+
+        return $this->getCurrentStatusForDay($today) === 'checked_in';
+    }
+
+    /**
+     * Check if the attendee is currently checked out (for today).
+     */
+    public function isCheckedOutToday(): bool
+    {
+        $today = $this->event->days()
+            ->whereDate('date', now()->toDateString())
+            ->first();
+
+        if (!$today) {
+            return false;
+        }
+
+        return $this->getCurrentStatusForDay($today) === 'checked_out';
     }
 }

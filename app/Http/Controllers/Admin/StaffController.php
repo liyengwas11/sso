@@ -25,8 +25,25 @@ class StaffController extends Controller
     {
         $this->authorize('manage-users', $request->user());
 
+        $staff = User::with('roles:id,name')
+            ->with(['media' => function ($query) {
+                $query->where('collection_name', 'profile_photo');
+            }])
+            ->orderBy('name')
+            ->get()
+            ->map(function ($user) {
+                return [
+                    'id' => $user->id,
+                    'name' => $user->name,
+                    'email' => $user->email,
+                    'status' => $user->status,
+                    'roles' => $user->roles,
+                    'photo_url' => $user->photo_url,
+                ];
+            });
+
         return Inertia::render('Admin/Staff/Index', [
-            'staff' => User::with('roles:id,name')->orderBy('name')->get(),
+            'staff' => $staff,
             'roles' => Role::all(['id', 'name']),
         ]);
     }
@@ -40,10 +57,44 @@ class StaffController extends Controller
             'status' => 'active',
         ]);
 
+        // Handle profile photo
+        if ($request->hasFile('photo')) {
+            $staff->addMediaFromRequest('photo')
+                ->toMediaCollection('profile_photo');
+        }
+
         $staff->syncRoles($request->validated('roles'));
 
         return redirect()->route('admin.staff.index')
             ->with('success', "{$staff->name} can now log in.");
+    }
+
+    public function update(StoreStaffRequest $request, User $staffMember): RedirectResponse
+    {
+        $data = [
+            'name' => $request->validated('name'),
+            'email' => $request->validated('email'),
+        ];
+
+        // Only update password if provided
+        if ($request->filled('password')) {
+            $data['password'] = Hash::make($request->validated('password'));
+        }
+
+        $staffMember->update($data);
+
+        // Handle profile photo
+        if ($request->hasFile('photo')) {
+            // Remove old photo if exists
+            $staffMember->clearMediaCollection('profile_photo');
+            $staffMember->addMediaFromRequest('photo')
+                ->toMediaCollection('profile_photo');
+        }
+
+        $staffMember->syncRoles($request->validated('roles'));
+
+        return redirect()->route('admin.staff.index')
+            ->with('success', "{$staffMember->name} updated.");
     }
 
     public function destroy(Request $request, User $staffMember): RedirectResponse
@@ -54,6 +105,9 @@ class StaffController extends Controller
             return redirect()->route('admin.staff.index')
                 ->with('error', "You can't remove your own account.");
         }
+
+        // Delete associated media
+        $staffMember->clearMediaCollection('profile_photo');
 
         $staffMember->delete();
 

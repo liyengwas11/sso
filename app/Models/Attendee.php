@@ -9,7 +9,6 @@ use Spatie\MediaLibrary\HasMedia;
 use Spatie\MediaLibrary\InteractsWithMedia;
 use Spatie\MediaLibrary\MediaCollections\Models\Media;
 
-
 class Attendee extends Model implements HasMedia
 {
     use HasFactory, InteractsWithMedia;
@@ -26,6 +25,9 @@ class Attendee extends Model implements HasMedia
         return $this->hasMany(EventPass::class);
     }
 
+    /**
+     * Register media collections for attendee photos
+     */
     public function registerMediaCollections(): void
     {
         $this->addMediaCollection('photo')
@@ -33,8 +35,56 @@ class Attendee extends Model implements HasMedia
             ->acceptsMimeTypes(['image/jpeg', 'image/png', 'image/webp']);
     }
 
+    /**
+     * Register media conversions for thumbnails
+     */
+    public function registerMediaConversions(?Media $media = null): void
+    {
+        $this->addMediaConversion('thumb')
+            ->width(100)
+            ->height(100)
+            ->sharpen(10);
+    }
+
+    /**
+     * Get the attendee's photo URL
+     * This is the method that's being called in the scan result
+     */
     public function photoUrl(): ?string
     {
         return $this->getFirstMediaUrl('photo') ?: null;
+    }
+
+    /**
+     * Get the attendee's photo thumbnail URL
+     */
+    public function photoThumbnail(): ?string
+    {
+        $media = $this->getFirstMedia('photo');
+        return $media ? $media->getUrl('thumb') : null;
+    }
+
+    /**
+     * Alias for photoUrl() - for consistency
+     */
+    public function getPhotoUrlAttribute(): ?string
+    {
+        return $this->photoUrl();
+    }
+
+    /**
+     * Get the attendee's photo as a base64 data URL (for QR codes/pass previews)
+     */
+    public function photoBase64(): ?string
+    {
+        $media = $this->getFirstMedia('photo');
+        if (!$media) return null;
+
+        $path = $media->getPath();
+        if (!file_exists($path)) return null;
+
+        $type = pathinfo($path, PATHINFO_EXTENSION);
+        $data = file_get_contents($path);
+        return 'data:image/' . $type . ';base64,' . base64_encode($data);
     }
 }
