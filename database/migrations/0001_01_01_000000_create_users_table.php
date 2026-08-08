@@ -11,12 +11,10 @@ return new class extends Migration
         Schema::create('users', function (Blueprint $table) {
             $table->id();
             $table->string('name');
-            $table->string('employment_number')->nullable()->unique();
             $table->string('email')->unique();
             $table->timestamp('email_verified_at')->nullable();
-            $table->string('password');
             $table->string('timezone')->default('Africa/Nairobi');
-            $table->string('status')->default('active'); // active | suspended
+            $table->string('password');
             $table->rememberToken();
             $table->timestamps();
         });
